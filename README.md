@@ -10,20 +10,20 @@
 
 ```mermaid
 flowchart TB
-    user[👤 User<br/>Plain English question]
-    in_guard[🛡️ Bedrock Guardrail (Input)]
-    agent[🤖 Strands Agent<br/>Nova Lite (Bedrock)]
-    listd[list_datasets]
-    schema[get_schema]
-    pandas[pandas_query<br/>(< 10,000 rows)]
-    tableinfo[get_athena_table_info]
-    athena_tool[athena_sql_query<br/>(aggregations, large data)]
-    pandas_engine[🐼 Pandas Engine<br/>in-memory CSV]
-    athena[Athena<br/>SQL on S3]
-    s3[(☁️ Amazon S3<br/>datasets/*.csv<br/>athena-results/<br/>logs/)]
-    out_guard[🛡️ Bedrock Guardrail (Output)]
-    logs[📊 CloudWatch Logs]
-    answer[👤 User<br/>Plain English answer]
+    user["User - plain English question"]
+    in_guard["Bedrock Guardrail (Input)"]
+    agent["Strands Agent - Nova Lite"]
+    listd["list_datasets"]
+    schema["get_schema"]
+    pandas["pandas_query (< 10,000 rows)"]
+    tableinfo["get_athena_table_info"]
+    athena_tool["athena_sql_query (aggregations, large data)"]
+    pandas_engine["Pandas Engine - in-memory CSV"]
+    athena["Athena - SQL on S3"]
+    s3["Amazon S3 - datasets and results"]
+    out_guard["Bedrock Guardrail (Output)"]
+    logs["CloudWatch Logs"]
+    answer["User - plain English answer"]
 
     user --> in_guard --> agent
 
