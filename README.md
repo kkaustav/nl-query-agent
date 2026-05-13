@@ -1,6 +1,6 @@
 # 🥕🎵 NL Query Agent
 
-> A production-grade Natural Language Data Query Agent built on AWS — ask questions in plain English, get answers from your S3 data. [file:20][web:29]
+> A production-grade Natural Language Data Query Agent built on AWS — ask questions in plain English, get answers from your S3 data.
 
 ---
 
@@ -93,7 +93,7 @@ flowchart TB
                               ▼
              ┌────────────────────────────────┐
              │         ☁️  AMAZON S3          │
-             │   s3://nl-query-agent-kaustubh │
+             │   s3://nl-query-agent-<you>   │
              │                                │
              │   datasets/farmers_market.csv  │
              │   datasets/spotify.csv         │
@@ -138,7 +138,10 @@ nl-query-agent/
 ├── athena_helper.py       ← 🔧 Helper: Athena async runner + table sync
 ├── logger.py              ← 🔧 Helper: CloudWatch logging + S3 archival
 │
-├── agent.py               ← 🤖 STEP 3: The agent — run this daily
+├── agent.py               ← 🤖 Terminal agent (run in shell)
+├── server.py              ← 🌐 FastAPI web server (browser UI)
+├── templates/
+│   └── index.html         ← 💬 Single-page chat UI for the agent
 │
 ├── farmers_market.csv     ← 📊 Local copy of dataset (uploaded by upload_data.py)
 ├── spotify.csv            ← 📊 Local copy of dataset (uploaded by upload_data.py)
@@ -155,7 +158,9 @@ nl-query-agent/
 | `guardrail_setup.py` | ✅ Run once | Creates Bedrock Guardrail + auto-writes ID to `config.py` |
 | `athena_helper.py` | ❌ Never directly | Runs Athena queries + can resync Athena tables from CSV |
 | `logger.py` | ❌ Never directly | Structured CloudWatch logging + S3 log archival |
-| `agent.py` | ✅ Run regularly | Main interactive agent loop |
+| `agent.py` | ✅ Optional | Main interactive agent loop in the terminal |
+| `server.py` | ✅ Optional | FastAPI server exposing the agent at `http://localhost:8000` |
+| `templates/index.html` | ❌ | Frontend chat UI rendered by the browser |
 
 ---
 
@@ -163,18 +168,18 @@ nl-query-agent/
 
 | Service | Role in This Project | Why |
 |---------|---------------------|-----|
-| **Amazon S3** | Stores CSV datasets, Athena query results, and archived logs | Cheap, durable, serverless storage [web:77] |
-| **Amazon Athena** | Runs SQL directly on S3 CSV files via external tables | No database to manage — query data where it lives [web:71][web:78] |
-| **AWS Glue (Data Catalog)** | Holds Athena table definitions for your CSVs | Athena uses Glue under the hood [web:57] |
-| **Amazon Bedrock** | Hosts Nova Lite LLM that powers the agent brain | Managed AI inference, no GPU needed [web:29] |
+| **Amazon S3** | Stores CSV datasets, Athena query results, and archived logs | Cheap, durable, serverless storage |
+| **Amazon Athena** | Runs SQL directly on S3 CSV files via external tables | No database to manage — query data where it lives |
+| **AWS Glue Data Catalog** | Holds Athena table definitions for your CSVs | Athena uses Glue under the hood |
+| **Amazon Bedrock** | Hosts Nova Lite LLM that powers the agent brain | Managed AI inference, no GPU needed |
 | **Bedrock Guardrails** | Safety layer on inputs + outputs | Blocks harmful content, PII, off-topic queries |
-| **Amazon CloudWatch** | Logs every agent interaction with 90-day retention | Audit trail, debugging, session history |
+| **Amazon CloudWatch Logs** | Logs every agent interaction with 90-day retention | Audit trail, debugging, session history |
 
 ---
 
 ## 🧠 How the Agent Decides What To Do
 
-The agent uses **Amazon Nova Lite (apac.amazon.nova-lite-v1:0)** as its brain, orchestrated via the Strands Agents SDK. It reads your question, chooses tools, and returns a plain-English answer. [file:20][web:29]
+The agent uses **Amazon Nova Lite (apac.amazon.nova-lite-v1:0)** as its brain, orchestrated via the Strands Agents SDK. It reads your question, chooses tools, and returns a plain-English answer.
 
 ### Tool Selection Logic
 
@@ -186,8 +191,7 @@ get_schema
   → ALWAYS called first for a dataset question to see columns + sample rows.
 
 pandas_query
-  → Overviews, stats, filters, and any dataset under PANDAS_THRESHOLD rows
-    (here: PANDAS_THRESHOLD = 10,000; farmers_market has 8,681 rows).
+  → Overviews, stats, filters, and any dataset under PANDAS_THRESHOLD rows.
 
 get_athena_table_info
   → Called before writing SQL to confirm exact column names for Athena.
@@ -212,7 +216,7 @@ Dataset size < 10,000 rows?
 
 The Bedrock Guardrail sits on both input and output.
 
-### Content Filters
+### Content Filters (examples)
 
 | Type | Input | Output |
 |------|-------|--------|
@@ -243,19 +247,20 @@ Any question not related to the configured datasets (farmers markets / Spotify) 
 
 ---
 
-## 📋 Setup Order (Start to Finish)
+## 🛠️ Setup Order (Start to Finish)
 
 ### Step 0 — Local setup
 
 ```bash
 cd ~/Documents
-# Create project folder and clone / copy files here
+# Clone or copy the repo here
 
-# Optional but recommended: create venv
+# Create venv (recommended)
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt   # if present
-pip install strands-agents boto3 pandas
+
+pip install -r requirements.txt  # if present
+pip install strands-agents boto3 pandas fastapi uvicorn
 ```
 
 Configure AWS CLI:
@@ -266,7 +271,9 @@ aws configure
 # Output: json
 ```
 
-Enable Nova Lite in Bedrock (Console) and attach IAM policy with S3, Athena, Bedrock, CloudWatch permissions. [web:29][web:40]
+In the AWS Console, enable **Nova Lite** in Bedrock Model Access for `ap-south-1`. Attach an IAM policy with S3, Athena, Bedrock, and CloudWatch permissions.
+
+---
 
 ### Step 1 — Upload data / initial tables
 
@@ -274,13 +281,17 @@ Enable Nova Lite in Bedrock (Console) and attach IAM policy with S3, Athena, Bed
 python3 upload_data.py
 ```
 
-This creates:
+This:
 
-- S3 bucket `nl-query-agent-kaustubh` (or your configured BUCKET).  
+- Creates S3 bucket `nl-query-agent-<you>` (or your configured BUCKET).
 - Uploads:
+
   - `farmers_market.csv` → `s3://BUCKET/datasets/farmers_market.csv`  
-  - `spotify.csv`        → `s3://BUCKET/datasets/spotify.csv`  
-- Creates Athena DB `nl_query_db` and initial table definitions. [web:21][web:58]
+  - `spotify.csv`        → `s3://BUCKET/datasets/spotify.csv`
+
+- Creates Athena DB `nl_query_db` and initial table definitions.
+
+---
 
 ### Step 2 — Guardrail setup
 
@@ -288,11 +299,16 @@ This creates:
 python3 guardrail_setup.py
 ```
 
-This creates a Bedrock Guardrail and writes its ID + version into `config.py` (`GUARDRAIL_ID`, `GUARDRAIL_VERSION`).
+This:
+
+- Creates a Bedrock Guardrail.
+- Writes its ID and version into `config.py` (`GUARDRAIL_ID`, `GUARDRAIL_VERSION`).
+
+---
 
 ### Step 3 — (Optional) Resync Athena tables from CSV
 
-If Athena schemas are ever wrong or drift out of sync, you can recreate them directly from the CSV header using `athena_helper.py`:
+If Athena schemas are ever wrong or drift out of sync, recreate them directly from the CSV header:
 
 ```bash
 cd ~/Documents/nl-query-agent
@@ -306,20 +322,73 @@ python3 -c "from athena_helper import sync_table_from_csv; sync_table_from_csv('
 
 This will:
 
-- Drop the existing table if it exists.  
+- Drop the existing table (if it exists).
 - Create a new external table with:
-  - Columns taken from the CSV header, sanitized to lowercase.  
-  - All columns as `string`.  
-  - OpenCSVSerde and `skip.header.line.count='1'`. [web:10][web:25][web:61]
 
-### Step 4 — Run the Agent
+  - Columns from the CSV header, sanitized to lowercase.  
+  - All columns as `string`.  
+  - OpenCSVSerde and `skip.header.line.count='1'`.
+
+---
+
+### Step 4a — Run the Terminal Agent
 
 ```bash
 cd ~/Documents/nl-query-agent
 python3 agent.py
 ```
 
-You’ll see the banner and can start asking questions in plain English.
+You’ll see the banner and can start asking questions in plain English from your terminal.
+
+---
+
+### Step 4b — 🖥️ Web UI (FastAPI + Browser)
+
+In addition to the terminal agent, you can run a browser-based UI.
+
+#### Start the Web Server (Local)
+
+From your terminal:
+
+```bash
+cd ~/Documents/nl-query-agent && source .venv/bin/activate && python server.py
+```
+
+You should see:
+
+```text
+🚀 NL Query Agent web server running
+👉 Open this in your browser: http://localhost:8000
+```
+
+Open that URL in your browser to chat with the agent.
+
+#### Web UI Features
+
+- Single-page HTML/JS frontend in `templates/index.html`.
+- Streaming responses via Server-Sent Events (SSE) (`text/event-stream`).
+- Same guardrails, logging, and query routing (Pandas vs Athena) as the terminal agent.
+- No Node/React — just FastAPI + vanilla HTML/JS.
+
+#### Optional: Public HTTPS URL with ngrok
+
+To demo the agent from other devices or share a temporary link:
+
+```bash
+# Install once (macOS)
+brew install ngrok
+
+# In a second terminal, while server.py is running:
+ngrok http 8000
+```
+
+ngrok will print a URL like:
+
+```text
+Forwarding  https://abcd-1234.ngrok-free.app -> http://localhost:8000
+```
+
+Open the `https://...ngrok...` link in any browser to access your NL Query Agent securely over HTTPS.
 
 ---
 
@@ -345,11 +414,13 @@ You: quit
 Agent: Archives logs and exits.
 ```
 
+The same questions work in the terminal **and** in the browser UI.
+
 ---
 
 ## 📊 CloudWatch Log Events
 
-Every interaction is logged as structured JSON in CloudWatch and archived into S3: [file:20][web:59]
+Every interaction is logged as structured JSON in CloudWatch and archived into S3:
 
 ```json
 {"timestamp": "2026-05-12T10:30:00Z", "event_type": "USER_QUERY",      "question": "top 5 states by markets?"}
@@ -360,7 +431,7 @@ Every interaction is logged as structured JSON in CloudWatch and archived into S
 Archived in S3 as:
 
 ```text
-s3://nl-query-agent-kaustubh/logs/YYYY/MM/DD/agent-session-{timestamp}.json
+s3://nl-query-agent-<you>/logs/YYYY/MM/DD/agent-session-{timestamp}.json
 ```
 
 ---
@@ -369,14 +440,14 @@ s3://nl-query-agent-kaustubh/logs/YYYY/MM/DD/agent-session-{timestamp}.json
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `BUCKET` | `nl-query-agent-kaustubh` | Globally unique S3 bucket name |
-| `REGION` | `ap-south-1` | AWS Mumbai region |
+| `BUCKET` | `nl-query-agent-yourname` | Globally unique S3 bucket name |
+| `REGION` | `ap-south-1` | AWS region |
 | `ATHENA_DB` | `nl_query_db` | Athena database name |
-| `ATHENA_OUTPUT` | `s3://nl-query-agent-kaustubh/athena-results/` | Where Athena writes query results |
+| `ATHENA_OUTPUT` | `s3://nl-query-agent-yourname/athena-results/` | Where Athena writes query results |
 | `MODEL_ID` | `apac.amazon.nova-lite-v1:0` | Bedrock model (Nova Lite) |
-| `PANDAS_THRESHOLD` | `10_000` | Max rows for pandas_query (farmers_market is 8,681) |
+| `PANDAS_THRESHOLD` | `10_000` | Max rows for pandas_query |
 | `DATASETS` | `{"farmers_market": "datasets/farmers_market.csv", "spotify": "datasets/spotify.csv"}` | S3 keys for CSVs |
-| `GUARDRAIL_ID` | `9iwaukwehxwu` | Guardrail ID (set by `guardrail_setup.py`) |
+| `GUARDRAIL_ID` | e.g. `9iwaukwehxwu` | Guardrail ID (set by `guardrail_setup.py`) |
 | `GUARDRAIL_VERSION` | `"1"` | Guardrail version |
 
 ---
@@ -389,22 +460,23 @@ s3://nl-query-agent-kaustubh/logs/YYYY/MM/DD/agent-session-{timestamp}.json
 | `AccessDeniedException` | Missing IAM permissions | Attach IAM policy with S3, Athena, Bedrock, CloudWatch access |
 | `BucketAlreadyExists` | Bucket name taken | Change `BUCKET` in `config.py` and rerun `python3 upload_data.py` |
 | `COLUMN_NOT_FOUND` in Athena | Table schema drift | Run `sync_table_from_csv('...', 'datasets/....csv')` again |
-| Agent loops on Athena errors | Too many Athena retries | Already fixed in `agent.py` — it caps at 2 attempts and falls back to pandas |
+| Agent loops on Athena errors | Too many Athena retries | Logic caps at 2 attempts and falls back to pandas |
 | Agent says “Athena query limit reached” | Athena still failing after 2 attempts | Ask a pandas-style question or resync the table from CSV |
+| Web UI 404 on `/` | `templates/index.html` missing | Ensure `templates/index.html` exists and `server.py` runs from project root |
 
 ---
 
 ## 💰 AWS Cost Estimate
 
-| Service | Usage | Estimated Cost |
-|---------|-------|----------------|
-| S3 | ~10MB data + logs | < $0.01/month [web:77] |
-| Athena | Per query scanned | ~$5 per TB scanned, ~\$0.00005 per small query [web:71][web:73] |
-| Bedrock (Nova Lite) | Per token | Roughly \$0.07 / 1M input, \$0.28 / 1M output tokens in 2026 [web:76][web:79] |
-| CloudWatch Logs | 90-day retention | ~$0.50/GB ingested; your usage is well below 1GB [web:80] |
+| Service | Usage | Estimated Cost (dev scale) |
+|---------|-------|---------------------------|
+| S3 | ~10MB data + logs | < $0.01/month |
+| Athena | Per query scanned | Tiny queries ≈ $0.00005 each |
+| Bedrock (Nova Lite) | Per token | Well under a few dollars/month for light dev |
+| CloudWatch Logs | 90-day retention | Well under 1 GB, so ≪ $0.50/month |
 
 For normal development usage this project should be well under **$1/month**.
 
 ---
 
-*Built with ❤️ using AWS Strands Agents SDK, Amazon Bedrock, Athena, and boto3.*
+*Built using AWS Strands Agents SDK, Amazon Bedrock, Athena, and boto3 — now with both terminal and browser UIs.*

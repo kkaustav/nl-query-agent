@@ -1,205 +1,232 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>🥕🎵 NL Query Agent</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    header {
-      width: 100%;
-      background: #1e293b;
-      padding: 16px 24px;
-      text-align: center;
-      border-bottom: 1px solid #334155;
-    }
-    header h1 { font-size: 1.4rem; color: #38bdf8; }
-    header p  { font-size: 0.85rem; color: #94a3b8; margin-top: 4px; }
-    #chat-container {
-      flex: 1;
-      width: 100%;
-      max-width: 800px;
-      overflow-y: auto;
-      padding: 24px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .message {
-      padding: 12px 16px;
-      border-radius: 12px;
-      max-width: 85%;
-      line-height: 1.6;
-      font-size: 0.95rem;
-      white-space: pre-wrap;
-    }
-    .user {
-      background: #0ea5e9;
-      color: #fff;
-      align-self: flex-end;
-      border-bottom-right-radius: 4px;
-    }
-    .agent {
-      background: #1e293b;
-      color: #e2e8f0;
-      align-self: flex-start;
-      border-bottom-left-radius: 4px;
-      border: 1px solid #334155;
-    }
-    .thinking {
-      color: #64748b;
-      font-style: italic;
-      font-size: 0.85rem;
-    }
-    #input-area {
-      width: 100%;
-      max-width: 800px;
-      padding: 16px;
-      display: flex;
-      gap: 10px;
-    }
-    #question {
-      flex: 1;
-      padding: 12px 16px;
-      border-radius: 10px;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #e2e8f0;
-      font-size: 1rem;
-      outline: none;
-    }
-    #question:focus { border-color: #0ea5e9; }
-    #send-btn {
-      padding: 12px 24px;
-      background: #0ea5e9;
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      font-size: 1rem;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    #send-btn:disabled { background: #334155; cursor: not-allowed; }
-    #send-btn:hover:not(:disabled) { background: #0284c7; }
-    .examples {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 0 16px 16px;
-      max-width: 800px;
-      width: 100%;
-    }
-    .chip {
-      background: #1e293b;
-      border: 1px solid #334155;
-      color: #94a3b8;
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 0.8rem;
-      cursor: pointer;
-    }
-    .chip:hover { border-color: #0ea5e9; color: #0ea5e9; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🥕🎵 NL Query Agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  #sidebar { width: 260px; background: #1a1d27; display: flex; flex-direction: column; border-right: 1px solid #2a2d3a; padding: 16px; gap: 16px; }
+  #sidebar h2 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Upload panel */
+  #upload-panel { background: #12151e; border: 2px dashed #3a3d4a; border-radius: 10px; padding: 14px; text-align: center; cursor: pointer; transition: border-color .2s; }
+  #upload-panel:hover { border-color: #7c5cbf; }
+  #upload-panel p { font-size: 12px; color: #777; margin-top: 6px; }
+  #upload-panel input[type=file] { display: none; }
+  #table-name-input { width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid #3a3d4a; background: #0f1117; color: #e0e0e0; font-size: 13px; margin-top: 8px; }
+  #upload-btn { margin-top: 8px; width: 100%; padding: 7px; border-radius: 6px; background: #7c5cbf; border: none; color: white; cursor: pointer; font-size: 13px; }
+  #upload-btn:hover { background: #9370db; }
+  #upload-status { font-size: 12px; margin-top: 6px; color: #aaa; min-height: 18px; }
+
+  /* History panel */
+  #history-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .history-item { background: #12151e; border-radius: 8px; padding: 8px 10px; font-size: 12px; cursor: pointer; border: 1px solid transparent; transition: border-color .15s; }
+  .history-item:hover { border-color: #7c5cbf; }
+  .history-item .ts { color: #555; font-size: 10px; margin-top: 2px; }
+  #clear-btn { padding: 7px; border-radius: 6px; background: #2a2d3a; border: none; color: #aaa; cursor: pointer; font-size: 12px; }
+  #clear-btn:hover { background: #3a3d4a; color: #e0e0e0; }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; }
+  #header { padding: 14px 20px; background: #1a1d27; border-bottom: 1px solid #2a2d3a; font-size: 16px; font-weight: 600; }
+
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .bubble { max-width: 78%; padding: 12px 16px; border-radius: 14px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; }
+  .user-bubble { background: #7c5cbf; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .agent-bubble { background: #1e2130; align-self: flex-start; border-bottom-left-radius: 4px; border: 1px solid #2a2d3a; }
+  .typing { color: #777; font-style: italic; }
+
+  #input-bar { padding: 14px 20px; background: #1a1d27; border-top: 1px solid #2a2d3a; display: flex; gap: 10px; }
+  #question { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid #3a3d4a; background: #0f1117; color: #e0e0e0; font-size: 14px; resize: none; height: 44px; }
+  #send-btn { padding: 10px 20px; background: #7c5cbf; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 14px; }
+  #send-btn:hover { background: #9370db; }
+  #send-btn:disabled { opacity: .5; cursor: default; }
+</style>
 </head>
 <body>
-  <header>
-    <h1>🥕🎵 NL Query Agent</h1>
-    <p>Ask questions about Farmers Market & Spotify data in plain English</p>
-  </header>
 
-  <div id="chat-container"></div>
+<!-- Sidebar -->
+<div id="sidebar">
 
-  <div class="examples">
-    <span class="chip" onclick="ask(this)">Top 5 markets in California</span>
-    <span class="chip" onclick="ask(this)">Average Spotify track duration</span>
-    <span class="chip" onclick="ask(this)">How many farmers markets accept credit cards?</span>
-    <span class="chip" onclick="ask(this)">Most popular music genres</span>
-    <span class="chip" onclick="ask(this)">Markets open on weekends in New York</span>
+  <!-- Upload Section -->
+  <h2>📂 Upload Dataset</h2>
+  <div id="upload-panel" onclick="document.getElementById('file-input').click()">
+    <div style="font-size:26px">📁</div>
+    <p>Click to upload<br>CSV · Parquet · JSON</p>
+    <input type="file" id="file-input" accept=".csv,.parquet,.json" onchange="handleFileSelect(event)"/>
   </div>
+  <input id="table-name-input" type="text" placeholder="Table name (e.g. my_sales)" />
+  <button id="upload-btn" onclick="uploadFile()">Upload & Register</button>
+  <div id="upload-status"></div>
 
-  <div id="input-area">
-    <input id="question" type="text" placeholder="Ask anything about your data..." onkeydown="if(event.key==='Enter') sendQuery()" />
+  <!-- Query History -->
+  <h2>🕘 Query History</h2>
+  <div id="history-list"></div>
+  <button id="clear-btn" onclick="clearSession()">🗑 Clear Session</button>
+
+</div>
+
+<!-- Main Chat -->
+<div id="main">
+  <div id="header">🥕🎵 NL Query Agent &nbsp;<span style="font-size:12px;color:#666;font-weight:400">Bedrock · Athena · Multi-format</span></div>
+  <div id="chat"></div>
+  <div id="input-bar">
+    <textarea id="question" placeholder="Ask anything about your data…" onkeydown="handleKey(event)"></textarea>
     <button id="send-btn" onclick="sendQuery()">Send ➤</button>
   </div>
+</div>
 
-  <script>
-    const chat = document.getElementById('chat-container');
-    const input = document.getElementById('question');
-    const btn   = document.getElementById('send-btn');
+<script>
+// ── Session ID (persisted in localStorage) ───────────────────────────────────
+let sessionId = localStorage.getItem("nl_session_id");
+if (!sessionId) {
+  sessionId = "sess_" + Math.random().toString(36).slice(2, 11);
+  localStorage.setItem("nl_session_id", sessionId);
+}
 
-    function ask(chip) {
-      input.value = chip.textContent;
-      sendQuery();
+let selectedFile = null;
+
+function handleFileSelect(e) {
+  selectedFile = e.target.files[0];
+  if (selectedFile) {
+    document.getElementById("upload-status").textContent = `Selected: ${selectedFile.name}`;
+    // Auto-fill table name from filename
+    const base = selectedFile.name.replace(/\.[^.]+$/, "").replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    document.getElementById("table-name-input").value = base;
+  }
+}
+
+async function uploadFile() {
+  const tableName = document.getElementById("table-name-input").value.trim();
+  const statusEl = document.getElementById("upload-status");
+
+  if (!selectedFile) { statusEl.textContent = "⚠️ Please select a file first."; return; }
+  if (!tableName)    { statusEl.textContent = "⚠️ Please enter a table name."; return; }
+
+  statusEl.textContent = "⏳ Uploading…";
+  document.getElementById("upload-btn").disabled = true;
+
+  const form = new FormData();
+  form.append("file", selectedFile);
+  form.append("table_name", tableName);
+
+  try {
+    const res = await fetch("/upload", { method: "POST", body: form });
+    const data = await res.json();
+    if (data.success) {
+      statusEl.textContent = data.message;
+      selectedFile = null;
+      document.getElementById("file-input").value = "";
+    } else {
+      statusEl.textContent = "❌ " + (data.error || "Upload failed.");
     }
+  } catch (e) {
+    statusEl.textContent = "❌ Network error: " + e.message;
+  }
+  document.getElementById("upload-btn").disabled = false;
+}
 
-    function addMessage(text, role) {
-      const div = document.createElement('div');
-      div.className = `message ${role}`;
-      div.textContent = text;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-      return div;
-    }
+// ── Query sending ─────────────────────────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendQuery(); }
+}
 
-    async function sendQuery() {
-      const question = input.value.trim();
-      if (!question) return;
+function addBubble(text, cls) {
+  const chat = document.getElementById("chat");
+  const div = document.createElement("div");
+  div.className = "bubble " + cls;
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
 
-      addMessage(question, 'user');
-      input.value = '';
-      btn.disabled = true;
+async function sendQuery() {
+  const input = document.getElementById("question");
+  const q = input.value.trim();
+  if (!q) return;
 
-      const thinking = addMessage('⏳ Thinking...', 'agent thinking');
+  input.value = "";
+  document.getElementById("send-btn").disabled = true;
 
-      try {
-        const res = await fetch('/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question })
-        });
+  addBubble(q, "user-bubble");
+  const agentBubble = addBubble("Thinking…", "agent-bubble typing");
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let agentDiv = null;
-        let fullText = '';
+  try {
+    const res = await fetch("/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q, session_id: sessionId })
+    });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = "";
+    agentBubble.textContent = "";
+    agentBubble.classList.remove("typing");
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
-
-          for (const line of lines) {
-            const data = JSON.parse(line.replace('data: ', ''));
-            fullText += data.text;
-
-            if (!agentDiv) {
-              thinking.remove();
-              agentDiv = addMessage(fullText, 'agent');
-            } else {
-              agentDiv.textContent = fullText;
-              chat.scrollTop = chat.scrollHeight;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data: ")) {
+          try {
+            const payload = JSON.parse(line.slice(6));
+            if (payload.text) {
+              fullText += payload.text;
+              agentBubble.textContent = fullText;
+              document.getElementById("chat").scrollTop = document.getElementById("chat").scrollHeight;
             }
-          }
+          } catch {}
         }
-      } catch (err) {
-        thinking.remove();
-        addMessage('❌ Error: ' + err.message, 'agent');
       }
-
-      btn.disabled = false;
-      input.focus();
     }
-  </script>
+  } catch (e) {
+    agentBubble.textContent = "Error: " + e.message;
+    agentBubble.classList.remove("typing");
+  }
+
+  document.getElementById("send-btn").disabled = false;
+  refreshHistory();
+}
+
+// ── History panel ─────────────────────────────────────────────────────────────
+async function refreshHistory() {
+  try {
+    const res = await fetch(`/history?session_id=${sessionId}`);
+    const data = await res.json();
+    const list = document.getElementById("history-list");
+    list.innerHTML = "";
+    // Show newest first
+    [...(data.history || [])].reverse().forEach(item => {
+      const div = document.createElement("div");
+      div.className = "history-item";
+      div.innerHTML = `<div>${item.q.length > 55 ? item.q.slice(0,55)+"…" : item.q}</div><div class="ts">${item.ts}</div>`;
+      div.onclick = () => {
+        document.getElementById("question").value = item.q;
+        document.getElementById("question").focus();
+      };
+      list.appendChild(div);
+    });
+  } catch {}
+}
+
+async function clearSession() {
+  await fetch(`/clear?session_id=${sessionId}`, { method: "POST" });
+  document.getElementById("history-list").innerHTML = "";
+  document.getElementById("chat").innerHTML = "";
+  // Generate new session ID
+  sessionId = "sess_" + Math.random().toString(36).slice(2, 11);
+  localStorage.setItem("nl_session_id", sessionId);
+}
+
+// Load history on page open
+refreshHistory();
+</script>
 </body>
 </html>
