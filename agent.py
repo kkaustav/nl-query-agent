@@ -318,5 +318,37 @@ def run():
             print(f"\n[Error] {e}")
 
 
+# ── Web-facing helper for FastAPI ─────────────────────────────────────────────
+def run_query(question: str) -> str:
+    """Used by server.py — takes a question string and returns the agent's answer."""
+    _athena_attempts.clear()
+
+    if not question.strip():
+        return "Please ask a non-empty question."
+
+    try:
+        is_safe, checked_input = check_guardrail(question, "INPUT")
+        if not is_safe:
+            return checked_input
+
+        log_query(question)
+
+        result = agent(checked_input)
+        response_text = str(result)
+
+        is_safe, final_output = check_guardrail(response_text, "OUTPUT")
+        if not is_safe:
+            log_response(question, "BLOCKED_BY_OUTPUT_GUARDRAIL", "GUARDRAIL")
+            return final_output
+
+        mode = "ATHENA" if "ATHENA_RESULT" in response_text else "PANDAS"
+        log_response(question, response_text, mode)
+        return final_output
+
+    except Exception as e:
+        log_error(str(e), context=f"run_query input: {question}")
+        return f"[Error] {e}"
+
+
 if __name__ == "__main__":
     run()
