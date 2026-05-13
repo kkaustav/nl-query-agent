@@ -12,3 +12,4 @@ output.json
 # Virtualenv
 .venv/
 venv/
+.DS_Store
