@@ -1,232 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>🥕🎵 NL Query Agent</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
-
-  /* ── Sidebar ── */
-  #sidebar { width: 260px; background: #1a1d27; display: flex; flex-direction: column; border-right: 1px solid #2a2d3a; padding: 16px; gap: 16px; }
-  #sidebar h2 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-
-  /* Upload panel */
-  #upload-panel { background: #12151e; border: 2px dashed #3a3d4a; border-radius: 10px; padding: 14px; text-align: center; cursor: pointer; transition: border-color .2s; }
-  #upload-panel:hover { border-color: #7c5cbf; }
-  #upload-panel p { font-size: 12px; color: #777; margin-top: 6px; }
-  #upload-panel input[type=file] { display: none; }
-  #table-name-input { width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid #3a3d4a; background: #0f1117; color: #e0e0e0; font-size: 13px; margin-top: 8px; }
-  #upload-btn { margin-top: 8px; width: 100%; padding: 7px; border-radius: 6px; background: #7c5cbf; border: none; color: white; cursor: pointer; font-size: 13px; }
-  #upload-btn:hover { background: #9370db; }
-  #upload-status { font-size: 12px; margin-top: 6px; color: #aaa; min-height: 18px; }
-
-  /* History panel */
-  #history-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
-  .history-item { background: #12151e; border-radius: 8px; padding: 8px 10px; font-size: 12px; cursor: pointer; border: 1px solid transparent; transition: border-color .15s; }
-  .history-item:hover { border-color: #7c5cbf; }
-  .history-item .ts { color: #555; font-size: 10px; margin-top: 2px; }
-  #clear-btn { padding: 7px; border-radius: 6px; background: #2a2d3a; border: none; color: #aaa; cursor: pointer; font-size: 12px; }
-  #clear-btn:hover { background: #3a3d4a; color: #e0e0e0; }
-
-  /* ── Main ── */
-  #main { flex: 1; display: flex; flex-direction: column; }
-  #header { padding: 14px 20px; background: #1a1d27; border-bottom: 1px solid #2a2d3a; font-size: 16px; font-weight: 600; }
-
-  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-  .bubble { max-width: 78%; padding: 12px 16px; border-radius: 14px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; }
-  .user-bubble { background: #7c5cbf; align-self: flex-end; border-bottom-right-radius: 4px; }
-  .agent-bubble { background: #1e2130; align-self: flex-start; border-bottom-left-radius: 4px; border: 1px solid #2a2d3a; }
-  .typing { color: #777; font-style: italic; }
-
-  #input-bar { padding: 14px 20px; background: #1a1d27; border-top: 1px solid #2a2d3a; display: flex; gap: 10px; }
-  #question { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid #3a3d4a; background: #0f1117; color: #e0e0e0; font-size: 14px; resize: none; height: 44px; }
-  #send-btn { padding: 10px 20px; background: #7c5cbf; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 14px; }
-  #send-btn:hover { background: #9370db; }
-  #send-btn:disabled { opacity: .5; cursor: default; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NL Query Agent</title>
+  <style>
+    :root { --bg:#0f1117; --panel:#171a24; --panel-2:#1d2130; --text:#f2f4f8; --muted:#a6afc3; --accent:#8b5cf6; --border:#2a3042; --border-soft:#3a4158; }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:radial-gradient(circle at top,#161a27 0%,var(--bg) 55%);color:var(--text);height:100vh;overflow:hidden}
+    .app{display:grid;grid-template-columns:320px 1fr;height:100vh}.sidebar{background:linear-gradient(180deg,#121521 0%,#10131b 100%);border-right:1px solid var(--border);padding:18px 16px;overflow-y:auto}
+    .title{font-size:18px;font-weight:800;margin-bottom:18px;display:flex;align-items:center;gap:10px;color:#d7dcff}.section-title{color:#aab2c8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:18px 0 12px}
+    .upload-card{border:2px dashed #3a4158;border-radius:18px;padding:22px 16px;text-align:center;background:rgba(255,255,255,.02);cursor:pointer}.upload-icon{font-size:34px;margin-bottom:10px;display:block}.upload-text{color:var(--muted);font-size:14px;line-height:1.4}
+    .input{width:100%;margin-top:14px;border-radius:10px;border:1px solid var(--border-soft);background:#10131b;color:var(--text);padding:12px 14px;font-size:15px;outline:none}.button{width:100%;margin-top:14px;border:none;border-radius:12px;padding:13px 14px;background:linear-gradient(180deg,#9b7bf7 0%,#7f5af0 100%);color:white;font-size:16px;font-weight:700;cursor:pointer}.button:disabled{opacity:.6;cursor:not-allowed}
+    .status-box{margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.03);white-space:pre-wrap;min-height:48px;color:#d7dcff}.status-box.ok{color:#8bf0b0;border-color:rgba(139,240,176,.35)}.status-box.error{color:#ff8f8f;border-color:rgba(255,143,143,.35)}
+    .history{margin-top:14px;max-height:calc(100vh - 360px);overflow-y:auto;padding-right:4px}.history-item{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:14px;color:#d7dcff;cursor:pointer}.history-item small{display:block;color:var(--muted);margin-top:6px;font-size:12px}
+    .main{display:flex;flex-direction:column;height:100vh;overflow:hidden}.header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:rgba(10,12,18,.55);backdrop-filter:blur(12px)}.brand{font-weight:800;color:#dfe4ff}.chat{flex:1;overflow-y:auto;padding:22px}
+    .message{max-width:860px;margin-bottom:14px;padding:16px 18px;border-radius:16px;line-height:1.6;white-space:pre-wrap;word-wrap:break-word}.user{margin-left:auto;background:linear-gradient(180deg,#8b5cf6 0%,#6d28d9 100%);color:white}.assistant{background:var(--panel-2);border:1px solid var(--border);color:#e9ecf4}
+    .composer{border-top:1px solid var(--border);padding:16px 18px;background:rgba(10,12,18,.6);backdrop-filter:blur(12px)}.composer-row{display:flex;gap:12px;align-items:center}.chat-input{flex:1;border:1px solid var(--border-soft);background:#10131b;color:var(--text);border-radius:14px;padding:14px 16px;font-size:15px;outline:none}.send-btn{border:none;border-radius:14px;padding:14px 18px;background:linear-gradient(180deg,#9b7bf7 0%,#7f5af0 100%);color:white;font-weight:800;cursor:pointer;min-width:98px}.send-btn:disabled{opacity:.65;cursor:not-allowed}.hidden{display:none}.file-name{margin-top:10px;color:#d7dcff;font-size:13px;word-break:break-word}
+  </style>
 </head>
 <body>
-
-<!-- Sidebar -->
-<div id="sidebar">
-
-  <!-- Upload Section -->
-  <h2>📂 Upload Dataset</h2>
-  <div id="upload-panel" onclick="document.getElementById('file-input').click()">
-    <div style="font-size:26px">📁</div>
-    <p>Click to upload<br>CSV · Parquet · JSON</p>
-    <input type="file" id="file-input" accept=".csv,.parquet,.json" onchange="handleFileSelect(event)"/>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="title">🤖 NL Query Agent</div>
+      <div class="section-title">Upload Dataset</div>
+      <div class="upload-card" id="uploadCard"><span class="upload-icon">📁</span><div class="upload-text">Click to upload<br>CSV · Parquet · JSON</div><input id="fileInput" class="hidden" type="file" accept=".csv,.parquet,.json" /></div>
+      <div class="file-name" id="fileName"></div>
+      <input id="datasetName" class="input" type="text" placeholder="dataset name" value="sample3" />
+      <button id="uploadBtn" class="button">Upload & Register</button>
+      <div class="section-title">Delete Dataset</div>
+      <input id="deleteDatasetName" class="input" type="text" placeholder="dataset name to delete" />
+      <button id="deleteBtn" class="button" style="background:linear-gradient(180deg,#f97373 0%,#dc2626 100%);">Delete Dataset</button>
+      <div id="actionStatus" class="status-box">Ready.</div>
+      <div class="section-title">Query History</div>
+      <div id="historyList" class="history"></div>
+    </aside>
+    <main class="main"><div class="header"><div class="brand">NL Query Agent</div></div><div id="chat" class="chat"></div><div class="composer"><div class="composer-row"><input id="queryInput" class="chat-input" type="text" placeholder="Ask a question..." /><button id="sendBtn" class="send-btn">Send ➤</button></div></div></main>
   </div>
-  <input id="table-name-input" type="text" placeholder="Table name (e.g. my_sales)" />
-  <button id="upload-btn" onclick="uploadFile()">Upload & Register</button>
-  <div id="upload-status"></div>
-
-  <!-- Query History -->
-  <h2>🕘 Query History</h2>
-  <div id="history-list"></div>
-  <button id="clear-btn" onclick="clearSession()">🗑 Clear Session</button>
-
-</div>
-
-<!-- Main Chat -->
-<div id="main">
-  <div id="header">🥕🎵 NL Query Agent &nbsp;<span style="font-size:12px;color:#666;font-weight:400">Bedrock · Athena · Multi-format</span></div>
-  <div id="chat"></div>
-  <div id="input-bar">
-    <textarea id="question" placeholder="Ask anything about your data…" onkeydown="handleKey(event)"></textarea>
-    <button id="send-btn" onclick="sendQuery()">Send ➤</button>
-  </div>
-</div>
-
-<script>
-// ── Session ID (persisted in localStorage) ───────────────────────────────────
-let sessionId = localStorage.getItem("nl_session_id");
-if (!sessionId) {
-  sessionId = "sess_" + Math.random().toString(36).slice(2, 11);
-  localStorage.setItem("nl_session_id", sessionId);
-}
-
-let selectedFile = null;
-
-function handleFileSelect(e) {
-  selectedFile = e.target.files[0];
-  if (selectedFile) {
-    document.getElementById("upload-status").textContent = `Selected: ${selectedFile.name}`;
-    // Auto-fill table name from filename
-    const base = selectedFile.name.replace(/\.[^.]+$/, "").replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    document.getElementById("table-name-input").value = base;
-  }
-}
-
-async function uploadFile() {
-  const tableName = document.getElementById("table-name-input").value.trim();
-  const statusEl = document.getElementById("upload-status");
-
-  if (!selectedFile) { statusEl.textContent = "⚠️ Please select a file first."; return; }
-  if (!tableName)    { statusEl.textContent = "⚠️ Please enter a table name."; return; }
-
-  statusEl.textContent = "⏳ Uploading…";
-  document.getElementById("upload-btn").disabled = true;
-
-  const form = new FormData();
-  form.append("file", selectedFile);
-  form.append("table_name", tableName);
-
-  try {
-    const res = await fetch("/upload", { method: "POST", body: form });
-    const data = await res.json();
-    if (data.success) {
-      statusEl.textContent = data.message;
-      selectedFile = null;
-      document.getElementById("file-input").value = "";
-    } else {
-      statusEl.textContent = "❌ " + (data.error || "Upload failed.");
-    }
-  } catch (e) {
-    statusEl.textContent = "❌ Network error: " + e.message;
-  }
-  document.getElementById("upload-btn").disabled = false;
-}
-
-// ── Query sending ─────────────────────────────────────────────────────────────
-function handleKey(e) {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendQuery(); }
-}
-
-function addBubble(text, cls) {
-  const chat = document.getElementById("chat");
-  const div = document.createElement("div");
-  div.className = "bubble " + cls;
-  div.textContent = text;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  return div;
-}
-
-async function sendQuery() {
-  const input = document.getElementById("question");
-  const q = input.value.trim();
-  if (!q) return;
-
-  input.value = "";
-  document.getElementById("send-btn").disabled = true;
-
-  addBubble(q, "user-bubble");
-  const agentBubble = addBubble("Thinking…", "agent-bubble typing");
-
-  try {
-    const res = await fetch("/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q, session_id: sessionId })
-    });
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = "";
-    agentBubble.textContent = "";
-    agentBubble.classList.remove("typing");
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("data: ")) {
-          try {
-            const payload = JSON.parse(line.slice(6));
-            if (payload.text) {
-              fullText += payload.text;
-              agentBubble.textContent = fullText;
-              document.getElementById("chat").scrollTop = document.getElementById("chat").scrollHeight;
-            }
-          } catch {}
-        }
-      }
-    }
-  } catch (e) {
-    agentBubble.textContent = "Error: " + e.message;
-    agentBubble.classList.remove("typing");
-  }
-
-  document.getElementById("send-btn").disabled = false;
-  refreshHistory();
-}
-
-// ── History panel ─────────────────────────────────────────────────────────────
-async function refreshHistory() {
-  try {
-    const res = await fetch(`/history?session_id=${sessionId}`);
-    const data = await res.json();
-    const list = document.getElementById("history-list");
-    list.innerHTML = "";
-    // Show newest first
-    [...(data.history || [])].reverse().forEach(item => {
-      const div = document.createElement("div");
-      div.className = "history-item";
-      div.innerHTML = `<div>${item.q.length > 55 ? item.q.slice(0,55)+"…" : item.q}</div><div class="ts">${item.ts}</div>`;
-      div.onclick = () => {
-        document.getElementById("question").value = item.q;
-        document.getElementById("question").focus();
-      };
-      list.appendChild(div);
-    });
-  } catch {}
-}
-
-async function clearSession() {
-  await fetch(`/clear?session_id=${sessionId}`, { method: "POST" });
-  document.getElementById("history-list").innerHTML = "";
-  document.getElementById("chat").innerHTML = "";
-  // Generate new session ID
-  sessionId = "sess_" + Math.random().toString(36).slice(2, 11);
-  localStorage.setItem("nl_session_id", sessionId);
-}
-
-// Load history on page open
-refreshHistory();
-</script>
+  <script>
+    const sessionId = localStorage.getItem("session_id") || `sess_${Math.random().toString(36).slice(2,12)}`; localStorage.setItem("session_id", sessionId);
+    const uploadCard=document.getElementById('uploadCard'), fileInput=document.getElementById('fileInput'), fileName=document.getElementById('fileName'), datasetName=document.getElementById('datasetName'), uploadBtn=document.getElementById('uploadBtn'), actionStatus=document.getElementById('actionStatus'), deleteDatasetName=document.getElementById('deleteDatasetName'), deleteBtn=document.getElementById('deleteBtn'), historyList=document.getElementById('historyList'), chat=document.getElementById('chat'), queryInput=document.getElementById('queryInput'), sendBtn=document.getElementById('sendBtn');
+    let selectedFile=null;
+    uploadCard.addEventListener('click',()=>fileInput.click());
+    fileInput.addEventListener('change',()=>{selectedFile=fileInput.files[0]||null; fileName.textContent=selectedFile?selectedFile.name:''});
+    function setStatus(text, kind='ok'){actionStatus.className=`status-box ${kind}`; actionStatus.textContent=text}
+    async function refreshHistory(){try{const res=await fetch(`/history?session_id=${encodeURIComponent(sessionId)}`,{cache:'no-store'}); const data=await res.json(); historyList.innerHTML=''; (data||[]).slice().reverse().forEach(item=>{const div=document.createElement('div'); div.className='history-item'; div.textContent=item.q; const small=document.createElement('small'); small.textContent=item.ts||''; div.appendChild(small); historyList.appendChild(div);});}catch(e){}}
+    async function fetchDatasets(){const res=await fetch(`/datasets?ts=${Date.now()}`,{cache:'no-store'}); if(!res.ok) throw new Error(`datasets endpoint failed (${res.status})`); return await res.json()}
+    function formatDatasets(prefix, datasets){return `${prefix} Current datasets: ${datasets.join(', ') || 'none'}.`}
+    function addMessage(text, role){const div=document.createElement('div'); div.className=`message ${role}`; div.textContent=text; chat.appendChild(div); chat.scrollTop=chat.scrollHeight; return div}
+    async function uploadDataset(){if(!selectedFile){setStatus('Please choose a file first.','error'); return} const name=datasetName.value.trim(); if(!name){setStatus('Please enter a dataset name.','error'); return} const formData=new FormData(); formData.append('file',selectedFile); formData.append('dataset_name',name); uploadBtn.disabled=true; try{const res=await fetch('/upload',{method:'POST',body:formData}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error||data.detail||`Upload failed (${res.status})`); const datasets=data.datasets||await fetchDatasets(); setStatus(formatDatasets('Uploaded.',datasets),'ok'); await refreshHistory();}catch(e){setStatus(`Upload failed. ${e.message}`,'error')}finally{uploadBtn.disabled=false}}
+    async function deleteDataset(){const name=deleteDatasetName.value.trim(); if(!name){setStatus('Please enter a dataset name to delete.','error'); return} deleteBtn.disabled=true; try{const formData=new FormData(); formData.append('dataset_name',name); const res=await fetch('/delete',{method:'POST',body:formData}); const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.error||data.detail||`Delete failed (${res.status})`); const datasets=data.datasets||await fetchDatasets(); setStatus(formatDatasets('Deleted.',datasets),'ok'); await refreshHistory();}catch(e){setStatus(`Delete failed. ${e.message}`,'error')}finally{deleteBtn.disabled=false}}
+    uploadBtn.addEventListener('click',uploadDataset); deleteBtn.addEventListener('click',deleteDataset);
+    async function sendQuery(){const question=queryInput.value.trim(); if(!question) return; addMessage(question,'user'); queryInput.value=''; sendBtn.disabled=true; const assistantBubble=addMessage('...','assistant'); try{const res=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,session_id:sessionId})}); const data=await res.json(); if(!res.ok) throw new Error(data.text||`Query failed (${res.status})`); assistantBubble.textContent=data.text||'No response received.';}catch(e){assistantBubble.textContent=`Error: ${e.message}`;}finally{sendBtn.disabled=false; refreshHistory()}}
+    sendBtn.addEventListener('click',sendQuery); queryInput.addEventListener('keydown',(e)=>{if(e.key==='Enter') sendQuery()});
+  </script>
 </body>
 </html>

@@ -1,18 +1,23 @@
-# server.py
-
+# output/server.py
 import asyncio
 import json
-import uuid
-import os
-from fastapi import FastAPI, UploadFile, File, Form, Cookie
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+
 import boto3
 import uvicorn
+from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from agent import run_query, register_dataset, get_query_history, clear_conversation
-from athena_helper import sync_table_from_file
+from agent import (
+    run_query,
+    refresh_datasets,
+    get_current_datasets,
+    register_dataset,
+    unregister_dataset,
+    clear_conversation,
+    get_query_history,
+)
 from config import BUCKET, REGION
 
 s3 = boto3.client("s3", region_name=REGION)
@@ -26,88 +31,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class QueryRequest(BaseModel):
     question: str
     session_id: str | None = None
-
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
     with open("templates/index.html", "r", encoding="utf-8") as f:
         return f.read()
 
+@app.get("/datasets")
+async def datasets():
+    # Always pull fresh from S3 so the sidebar reflects reality
+    refresh_datasets()
+    return JSONResponse(content=sorted(get_current_datasets().keys()))
 
 @app.post("/query")
 async def query(request: QueryRequest):
-    session_id = request.session_id or "default"
-
-    async def stream_response():
-        try:
-            result = await asyncio.to_thread(run_query, request.question, session_id)
-            yield f"data: {json.dumps({'text': result, 'done': False})}\n\n"
-            yield f"data: {json.dumps({'text': '', 'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'text': f'Error: {str(e)}', 'done': True})}\n\n"
-
-    return StreamingResponse(stream_response(), media_type="text/event-stream")
-
+    try:
+        # Refresh before every query — handles uploads done in another terminal/process
+        await asyncio.to_thread(refresh_datasets)
+        result = await asyncio.to_thread(run_query, request.question, request.session_id)
+        return JSONResponse(content={"text": result, "done": True})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"text": f"Error: {str(e)}", "done": True})
 
 @app.post("/upload")
-async def upload_dataset(
+async def upload(
     file: UploadFile = File(...),
-    table_name: str = Form(...)
+    dataset_name: str = Form(...),
 ):
-    """
-    Accepts CSV, Parquet, or JSON uploads.
-    Uploads to S3, registers in the agent, syncs Athena table.
-    """
-    allowed_exts = {"csv", "parquet", "json"}
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-
-    if ext not in allowed_exts:
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"Unsupported file type '.{ext}'. Allowed: csv, parquet, json"}
-        )
-
-    # Sanitize table name
-    safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in table_name.lower())
-    s3_key = f"datasets/{safe_name}/{safe_name}.{ext}"
-
     try:
+        if not file.filename:
+            return JSONResponse(status_code=400, content={"error": "No file selected."})
+
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+        if ext not in ("csv", "parquet", "json"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Unsupported file type: .{ext}. Use CSV, Parquet, or JSON."},
+            )
+
         contents = await file.read()
+        s3_key = f"datasets/{dataset_name}.{ext}"
         s3.put_object(Bucket=BUCKET, Key=s3_key, Body=contents)
 
-        # Register dataset in agent memory
-        register_dataset(safe_name, s3_key)
+        register_dataset(dataset_name, s3_key)
+        refresh_datasets()
 
-        # Sync Athena external table
-        await asyncio.to_thread(sync_table_from_file, safe_name, s3_key)
-
-        return JSONResponse(content={
-            "success": True,
-            "message": f"✅ Dataset '{safe_name}' uploaded and registered ({ext.upper()}, {len(contents):,} bytes).",
-            "table_name": safe_name,
-            "s3_key": s3_key
-        })
-
+        return JSONResponse(
+            content={
+                "message": f"Uploaded and registered dataset '{dataset_name}'.",
+                "dataset_name": dataset_name,
+                "datasets": sorted(get_current_datasets().keys()),
+            }
+        )
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.post("/delete")
+async def delete(dataset_name: str = Form(...)):
+    try:
+        refresh_datasets()
+        datasets_map = get_current_datasets()
+        key = datasets_map.get(dataset_name)
+
+        if not key:
+            return JSONResponse(status_code=404, content={"error": f"Dataset '{dataset_name}' not found."})
+
+        s3.delete_object(Bucket=BUCKET, Key=key)
+        unregister_dataset(dataset_name)
+        refresh_datasets()
+
+        return JSONResponse(
+            content={
+                "message": f"Deleted dataset '{dataset_name}' successfully.",
+                "datasets": sorted(get_current_datasets().keys()),
+            }
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/history")
 async def history(session_id: str = "default"):
-    """Returns the query history list for a given session."""
-    return JSONResponse(content={"history": get_query_history(session_id)})
-
+    return JSONResponse(content=get_query_history(session_id))
 
 @app.post("/clear")
 async def clear(session_id: str = "default"):
-    """Clears conversation memory and query history for a session."""
     clear_conversation(session_id)
-    return JSONResponse(content={"success": True})
-
+    return JSONResponse(content={"message": "Conversation cleared."})
 
 if __name__ == "__main__":
     print("\n🚀 NL Query Agent web server running")
