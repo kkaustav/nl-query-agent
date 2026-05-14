@@ -1,35 +1,78 @@
-# 🥕🎵 NL Query Agent
+# 🤖 NL Query Agent
 
-> A production-grade Natural Language Data Query Agent built on AWS — ask questions in plain English, get answers from your S3 data. Supports CSV, Parquet, and JSON. Upload your own datasets. Remembers your conversation.
+> A production-grade Natural Language Data Query Agent built on AWS — ask questions in plain English and get answers from your data in S3. Supports CSV, Parquet, and JSON. Upload, query, and delete datasets directly from the browser UI. Remembers your conversation per session, keeps history in the sidebar, and is hardened with IAM and Bedrock Guardrails.
 
 ---
 
-## 🏗️ Architecture Overview
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture Overview](#architecture-overview)
+- [What's New](#whats-new)
+- [Project Structure](#project-structure)
+- [AWS Services Used](#aws-services-used)
+- [How the Agent Decides What To Do](#how-the-agent-decides-what-to-do)
+- [Web UI Features](#web-ui-features)
+- [Guardrails and Security](#guardrails-and-security)
+- [Setup Order](#setup-order)
+- [Usage Examples](#usage-examples)
+- [CloudWatch Log Events](#cloudwatch-log-events)
+- [Configuration Reference](#configuration-reference)
+- [Troubleshooting](#troubleshooting)
+- [AWS Cost Estimate](#aws-cost-estimate)
+
+---
+
+## Overview
+
+Most analysts still have to choose between writing SQL, waiting on engineers, or manually handling data in S3. This project makes structured data feel conversational while keeping the system production-ready and secure.
+
+The agent answers natural-language questions over CSV, Parquet, and JSON datasets. It automatically routes small datasets to Pandas and larger workloads to Athena, while Bedrock Guardrails and IAM hardening protect the workflow end to end.
+
+It now runs behind a browser UI built with FastAPI, so you can upload datasets, delete them, view history, and query data from any browser tab.
+
+---
+
+## Architecture Overview
 
 ### Mermaid diagram
 
 ```mermaid
 flowchart TB
     user["User - plain English question"]
-    in_guard["Bedrock Guardrail (Input)"]
-    agent["Strands Agent - Nova Lite"]
-    memory["Per-Session Memory (last 5 turns)"]
+    browser["Browser UI"]
+    upload["Upload Dataset"]
+    delete["Delete Dataset"]
+    history["Query History Sidebar"]
+    session["Session memory in localStorage"]
+    api["FastAPI server.py"]
+    query["POST /query"]
+    upload_api["POST /upload"]
+    delete_api["POST /delete"]
+    history_api["GET /history"]
+    clear_api["POST /clear"]
+    agent["Strands Agent - Amazon Nova Lite"]
+    guard_in["Bedrock Guardrail - Input"]
+    guard_out["Bedrock Guardrail - Output"]
     listd["list_datasets"]
     schema["get_schema"]
-    pandas["pandas_query (CSV / Parquet / JSON < 10K rows)"]
+    pandas["pandas_query"]
     tableinfo["get_athena_table_info"]
-    athena_tool["athena_sql_query (aggregations, large data)"]
+    athena_tool["athena_sql_query"]
+    s3["Amazon S3 - datasets / uploads / logs"]
     pandas_engine["Pandas Engine - in-memory CSV / Parquet / JSON"]
-    athena["Athena - SQL on S3"]
-    s3["Amazon S3 - datasets / uploads / results / logs"]
-    out_guard["Bedrock Guardrail (Output) + strip_thinking()"]
+    athena["Amazon Athena - SQL on S3"]
     logs["CloudWatch Logs"]
-    answer["User - plain English answer"]
-    upload["User File Upload (CSV / Parquet / JSON)"]
-    history["Query History Panel (per session)"]
+    answer["Plain English answer"]
 
-    user --> in_guard --> agent
-    upload --> s3
+    user --> browser
+    browser --> query --> api
+    browser --> upload --> upload_api --> api
+    browser --> delete --> delete_api --> api
+    browser --> history --> history_api --> api
+    browser --> clear_api --> api
+    browser --> session
+    api --> guard_in --> agent
 
     subgraph Tools
         agent --> listd
@@ -39,155 +82,138 @@ flowchart TB
         agent --> athena_tool
     end
 
-    agent --> memory
-    agent --> history
+    agent --> guard_out --> answer
+    agent --> logs
 
     pandas --> pandas_engine --> s3
     tableinfo --> s3
     athena_tool --> athena --> s3
-
-    agent --> out_guard --> answer
-    agent --> logs
+    upload_api --> s3
+    delete_api --> s3
 ```
 
 ### ASCII Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        USER (Plain English)                         │
+│                              USER                                   │
 │         "What are the top 5 states by farmers market count?"        │
-│                                                                     │
-│   🖥️  Web UI  ──────────────────────────────────────────────────   │
-│   ┌──────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│   │  📂 Upload Panel  │  │  🕘 Query History│  │  💬 Chat + SSE  │  │
-│   │  CSV/Parquet/JSON │  │  Per-session    │  │  Streaming resp │  │
-│   └──────────────────┘  └─────────────────┘  └─────────────────┘  │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    🛡️  BEDROCK GUARDRAIL (INPUT)                    │
-│         Blocks: hate, violence, prompt attacks, off-topic           │
-│         Anonymizes: PII (emails, phone numbers, names)              │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │ safe input only
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│              🤖  STRANDS AGENT (Orchestration Layer)                │
-│                  Model: Amazon Nova Lite (Bedrock)                  │
-│                                                                     │
-│   Agent autonomously decides which tool to call:                    │
-│                                                                     │
-│   ┌─────────────────┐   ┌──────────────────┐   ┌───────────────┐  │
-│   │  list_datasets  │   │   get_schema     │   │ pandas_query  │  │
-│   │  All datasets   │   │  Column names,   │   │ In-memory     │  │
-│   │  incl. uploads  │   │  types, samples  │   │ CSV/Parquet/  │  │
-│   └─────────────────┘   └──────────────────┘   │ JSON < 10K    │  │
-│                                                 └───────────────┘  │
-│   ┌──────────────────────────┐   ┌──────────────────────────────┐  │
-│   │  get_athena_table_info   │   │     athena_sql_query         │  │
-│   │  Exact column names for  │   │  Real SQL on S3 via Athena   │  │
-│   │  SQL query building      │   │  COUNT/GROUP BY/TOP N        │  │
-│   └──────────────────────────┘   │  Max 2 retries → pandas      │  │
-│                                  └──────────────────────────────┘  │
-│                                                                     │
-│   🧠 Per-Session Conversation Memory                                │
-│      Last 5 Q&A turns · isolated by session_id (localStorage)      │
+│                            BROWSER UI                               │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
+│  │ Upload Dataset   │  │ Delete Dataset   │  │ Query History    │  │
+│  │ CSV/Parquet/JSON │  │ No S3 console    │  │ One-click rerun  │  │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ Session-aware memory via localStorage per browser tab       │   │
+│  └──────────────────────────────────────────────────────────────┘   │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
-                    ┌───────────┴────────────┐
-                    │                        │
-                    ▼                        ▼
-   ┌─────────────────────┐     ┌─────────────────────────────┐
-   │   🐼 PANDAS ENGINE  │     │     🔍 AMAZON ATHENA        │
-   │   CSV / Parquet /   │     │     For large data / SQL    │
-   │   JSON < 10K rows   │     │     ≥ 10,000 rows           │
-   │   Loaded into RAM   │     │     Serverless SQL on S3    │
-   └──────────┬──────────┘     └──────────────┬──────────────┘
-              │                               │
-              └───────────────┬───────────────┘
-                              │ reads from / writes to
-                              ▼
-             ┌────────────────────────────────────────┐
-             │              ☁️  AMAZON S3              │
-             │   s3://nl-query-agent-<you>            │
-             │                                        │
-             │   datasets/farmers_market/             │
-             │     └── farmers_market.csv             │
-             │   datasets/spotify/                    │
-             │     └── spotify.csv                    │
-             │   datasets/<uploaded>/                 │
-             │     └── <file>.csv / .parquet / .json  │
-             │   athena-results/  (temp)              │
-             │   logs/YYYY/MM/DD/ (archived sessions) │
-             └────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    🛡️  BEDROCK GUARDRAIL (OUTPUT)                   │
-│         Checks agent response before showing to user                │
-│         Grounding threshold: 0.7 | Relevance threshold: 0.7         │
-│         strip_thinking() removes  tags      │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │ safe response only
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                   📊  CLOUDWATCH LOGS                               │
-│   Logs every event: USER_QUERY | AGENT_RESPONSE | GUARDRAIL_EVENT   │
-│   Retention: 90 days | Archive: exported to S3 on quit/archive      │
-└─────────────────────────────────────────────────────────────────────┘
+│                           FASTAPI SERVER                             │
+│  /query   /upload   /delete   /history   /clear                      │
+│  JSON responses for query flow                                       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                     ┌──────────┴───────────┐
+                     ▼                      ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│   BEDROCK GUARDRAIL (Input)   │   │   BEDROCK GUARDRAIL (Output)  │
+│   blocks unsafe prompts       │   │   filters final responses     │
+└───────────────┬───────────────┘   └───────────────┬───────────────┘
+                │                                   │
+                ▼                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                       STRANDS AGENT + NOVA LITE                     │
+│                                                                     │
+│  Tool routing:                                                      │
+│  -  list_datasets                                                    │
+│  -  get_schema                                                       │
+│  -  pandas_query                                                     │
+│  -  get_athena_table_info                                            │
+│  -  athena_sql_query                                                 │
+│                                                                     │
+│  Routing logic:                                                     │
+│  -  Small datasets -> Pandas                                         │
+│  -  Large datasets -> Athena                                          │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+        ┌──────────────────────┐   ┌───────────────────────────────┐
+        │  PANDAS ENGINE       │   │  AMAZON ATHENA                │
+        │  in-memory analysis   │   │  serverless SQL on S3         │
+        └──────────┬───────────┘   └──────────────┬────────────────┘
+                   │                              │
+                   └──────────────┬───────────────┘
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                              AMAZON S3                              │
+│  datasets/  uploads/  athena-results/  logs/                        │
+└───────────────────────────────┬─────────────────────────────────────┘
                                 │
                                 ▼
-                    ┌───────────────────────┐
-                    │   👤 USER RESPONSE    │
-                    │   Plain English answer│
-                    └───────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        CLOUDWATCH LOGS                               │
+│  queries, responses, guardrail events, debugging                    │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+                         ┌───────────────┐
+                         │  USER ANSWER  │
+                         └───────────────┘
 ```
 
 ---
 
-## ✨ What's New (v2)
+## What's New
 
 | Feature | Details |
-|---------|---------|
-| **Multi-format datasets** | Upload and query CSV, Parquet, and JSON — auto-detected by file extension |
-| **Per-session memory** | Agent remembers the last 5 Q&A turns per browser tab for follow-up questions |
-| **Dataset upload via UI** | Drag-and-drop in the web sidebar — uploads to S3 and registers to Athena instantly |
-| **Query history panel** | Left sidebar logs every question; click any item to re-populate the input |
-| **Dynamic dataset registry** | Uploaded datasets available to all tools immediately, no server restart |
-| **`strip_thinking()`** | Nova Lite internal `<thinking>` tags filtered before responses reach the user |
-| **Session isolation** | Each browser tab gets its own `session_id` via localStorage |
+|---|---|
+| Browser upload UI | Upload CSV, Parquet, or JSON directly from the app. |
+| Browser delete UI | Delete datasets from the app without opening the S3 console. |
+| Query history | Sidebar shows previous questions for the current session. |
+| Session-aware memory | Each browser tab has its own session context via `localStorage`. |
+| Multi-format support | CSV, Parquet, and JSON are all supported through the same agent flow. |
+| IAM hardening | Tighter permissions for safer access control. |
+| Bedrock Guardrails | Input and output safety checks remain enforced. |
+| CloudWatch logging | Every query, response, and guardrail decision is logged. |
+| FastAPI API layer | `/query`, `/upload`, `/delete`, `/history`, and `/clear` endpoints. |
+| JSON query flow | The browser now reads `/query` as JSON instead of stream chunks. |
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```text
 nl-query-agent/
 │
-├── config.py              ← ⚙️  All settings — BUCKET, REGION, DATASETS, thresholds
+├── config.py              ← ⚙️ All settings — BUCKET, REGION, DATASETS, thresholds
 ├── requirements.txt       ← 📦 Python dependencies
 │
-├── upload_data.py         ← 🚀 STEP 1: Creates S3 bucket + uploads initial CSVs
-├── guardrail_setup.py     ← 🛡️  STEP 2: Creates Bedrock Guardrail
+├── upload_data.py         ← 🚀 Step 1: Create S3 bucket + upload initial datasets
+├── guardrail_setup.py     ← 🛡️ Step 2: Create Bedrock Guardrail
 │
-├── athena_helper.py       ← 🔧 Athena runner + multi-format table sync (CSV/Parquet/JSON)
+├── athena_helper.py       ← 🔧 Athena runner + multi-format table sync
 ├── logger.py              ← 🔧 CloudWatch logging + S3 archival
 │
-├── agent.py               ← 🤖 Agent core: tools, per-session memory, run_query()
-├── server.py              ← 🌐 FastAPI: /query /upload /history /clear endpoints
+├── agent.py               ← 🤖 Agent core: tools, memory, run_query()
+├── server.py              ← 🌐 FastAPI backend for UI + dataset ops
 ├── templates/
-│   └── index.html         ← 💬 Chat UI with upload panel + query history sidebar
+│   └── index.html         ← 💬 Browser UI for upload, delete, history, and chat
 │
-├── farmers_market.csv     ← 📊 Bundled dataset
-├── spotify.csv            ← 📊 Bundled dataset
+├── datasets/              ← 📁 Uploaded datasets live here in S3
 └── README.md              ← 📖 This file
 ```
 
 ### File Responsibilities
 
 | File | Run It? | Purpose |
-|------|---------|---------|
+|---|---|---|
 | `config.py` | ❌ Edit once | BUCKET, REGION, MODEL_ID, DATASETS, thresholds |
 | `requirements.txt` | ❌ Used by pip | Python package list |
 | `upload_data.py` | ✅ Run once | Creates S3 bucket, uploads CSVs, registers Athena DB |
@@ -196,26 +222,27 @@ nl-query-agent/
 | `logger.py` | ❌ Never directly | CloudWatch logging + S3 log archival |
 | `agent.py` | ✅ Optional | Agent brain: tools, memory, run_query() |
 | `server.py` | ✅ Run to start | FastAPI server at http://localhost:8000 |
-| `templates/index.html` | ❌ | Chat UI with upload + history sidebar |
+| `templates/index.html` | ❌ | Chat UI with upload, delete, and history sidebar |
 
 ---
 
-## ☁️ AWS Services Used
+## AWS Services Used
 
 | Service | Role | Why |
-|---------|------|-----|
-| **Amazon S3** | Stores datasets (CSV/Parquet/JSON), Athena results, archived logs | Cheap, durable, serverless |
-| **Amazon Athena** | Serverless SQL on S3 external tables | No database to manage |
-| **AWS Glue Data Catalog** | Holds Athena table definitions | Athena uses Glue under the hood |
-| **Amazon Bedrock** | Nova Lite LLM for reasoning + Guardrails for safety | Managed AI inference, no GPU |
-| **Bedrock Guardrails** | Safety layer on input + output | Blocks harmful content, PII, off-topic |
-| **Amazon CloudWatch Logs** | Structured logging with 90-day retention | Audit trail + debugging |
+|---|---|---|
+| Amazon S3 | Stores datasets, Athena results, and archived logs. | Cheap, durable, serverless. |
+| Amazon Athena | Serverless SQL for larger datasets. | No database to manage. |
+| AWS Glue Data Catalog | Holds Athena table definitions. | Athena uses Glue under the hood. |
+| Amazon Bedrock | Nova Lite for reasoning and Guardrails for safety. | Managed AI inference, no GPU. |
+| Bedrock Guardrails | Safety layer on input + output. | Blocks harmful content, PII, off-topic prompts. |
+| Amazon CloudWatch Logs | Structured logging with retention. | Audit trail + debugging. |
+| AWS IAM | Least-privilege access control. | Reduces blast radius and limits access. |
 
 ---
 
-## 🧠 How the Agent Decides What To Do
+## How the Agent Decides What To Do
 
-The agent uses **Amazon Nova Lite (apac.amazon.nova-lite-v1:0)** via the Strands Agents SDK.
+The agent uses **Amazon Nova Lite** via the Strands Agents SDK.
 
 ### Tool Selection Logic
 
@@ -230,7 +257,7 @@ get_schema
 
 pandas_query
   → Overviews, stats, filters, datasets < PANDAS_THRESHOLD rows.
-  → Auto-detects file format (CSV / Parquet / JSON) via extension.
+  → Auto-detects file format via extension.
 
 get_athena_table_info
   → Called before writing SQL to confirm exact column names.
@@ -244,82 +271,81 @@ athena_sql_query
 
 ```text
 Dataset size < 10,000 rows?
-    YES → pandas_query  (fast, in-memory — CSV / Parquet / JSON)
-    NO  → athena_sql_query  (serverless SQL on S3)
+    YES → pandas_query
+    NO  → athena_sql_query
 ```
 
 ### Conversation Memory
 
 ```text
 Each browser tab → unique session_id (stored in localStorage)
-Per session → last 5 Q&A turns stored in _sessions dict
-Memory context → appended to every new prompt automatically
+Per session → recent Q&A turns kept for follow-ups
 Terminal agent → uses session_id = "terminal"
-Clear Session button → wipes memory + history + generates new session_id
+Clear Session button → wipes memory + history + generates a new session_id
 ```
 
 ---
 
-## 🖥️ Web UI Features
+## Web UI Features
 
-- **Upload panel** — drag-and-drop CSV / Parquet / JSON; uploads to S3 + registers Athena table instantly
-- **Query history sidebar** — all questions logged with timestamp; click to re-run
-- **Streaming responses** — Server-Sent Events (SSE), no page reloads
-- **Session memory** — last 5 turns remembered per browser tab
-- **Clear Session** — wipes memory and history, generates new session ID
+- Upload datasets directly from the browser.
+- Delete datasets directly from the browser.
+- View query history and re-run past questions.
+- Keep memory scoped per browser tab.
+- Talk to the agent from any browser, not just terminal.
 
 ### API Endpoints
 
 | Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Serves the chat UI |
-| `/query` | POST | Streams agent response (SSE), accepts `session_id` |
-| `/upload` | POST | Accepts file upload, registers to S3 + Athena |
-| `/history` | GET | Returns query history list for a session |
-| `/clear` | POST | Clears session memory and history |
+|---|---|---|
+| `/` | GET | Serves the browser UI. |
+| `/query` | POST | Returns the agent response as JSON. |
+| `/upload` | POST | Uploads and registers a dataset. |
+| `/delete` | POST | Deletes a dataset from S3 and registry. |
+| `/history` | GET | Returns query history for the session. |
+| `/clear` | POST | Clears session memory and history. |
 
 ---
 
-## 🛡️ Guardrail Configuration
+## Guardrails and Security
 
-| Type | Input | Output |
-|------|-------|--------|
-| Hate speech | HIGH | HIGH |
-| Insults | HIGH | HIGH |
-| Violence | MEDIUM | MEDIUM |
-| Misconduct | HIGH | HIGH |
-| Prompt attacks | HIGH | NONE |
-
-**PII Protection:** Emails, phone numbers, names → Anonymized. AWS keys, passwords → Blocked.
-
-**Output Checks:** Grounding ≥ 0.7 · Relevance ≥ 0.7 · `<thinking>` tags stripped via `strip_thinking()`.
+| Layer | What it protects |
+|---|---|
+| Input Guardrail | Blocks unsafe or irrelevant prompts before they reach the agent. |
+| Output Guardrail | Validates the final answer before it reaches the user. |
+| IAM hardening | Limits S3, Athena, Bedrock, and CloudWatch access to only what the app needs. |
+| Session isolation | Keeps browser sessions separate through `session_id`. |
 
 ---
 
-## 🛠️ Setup Order
+## Setup Order
 
-### Step 0 — Local setup
+### 1) Local setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install strands-agents boto3 pandas fastapi uvicorn python-multipart pyarrow
-aws configure  # Region: ap-south-1
+aws configure
 ```
 
-### Step 1 — Upload initial data
+### 2) Upload initial data
 
 ```bash
 python3 upload_data.py
 ```
 
-### Step 2 — Guardrail setup
+### 3) Set up guardrails
 
 ```bash
 python3 guardrail_setup.py
 ```
 
-### Step 3 — Start the Web Server
+### 4) Start the web server
+
+```bash
+python3 server.py
+```
 
 **Option A — Foreground (terminal stays busy, Ctrl+C to stop):**
 
@@ -335,18 +361,13 @@ To stop the background server:
 
     pkill -f server.py
 
-### Step 4 — (Optional) Resync Athena tables
+Open:
 
-```bash
-# For CSV
-python3 -c "from athena_helper import sync_table_from_csv; sync_table_from_csv('spotify', 'datasets/spotify.csv')"
-
-# For Parquet or JSON (new in v2)
-python3 -c "from athena_helper import sync_table_from_file; sync_table_from_file('iris', 'datasets/iris/iris.parquet')"
-python3 -c "from athena_helper import sync_table_from_file; sync_table_from_file('output', 'datasets/output/output.json')"
+```text
+http://localhost:8000
 ```
 
-### Step 5 — (Optional) Public URL via ngrok
+### 5) Optional public URL
 
 ```bash
 ngrok http 8000
@@ -354,89 +375,84 @@ ngrok http 8000
 
 ---
 
-## 💬 Usage Examples
+## Usage Examples
 
 ```text
 You: What datasets are available?
-Agent: Lists all registered datasets including any uploaded files.
+Agent: Lists all registered datasets, including uploaded ones.
+
+You: Upload a new JSON dataset
+Agent: Stores it in S3 and registers it immediately.
+
+You: Delete the sample3 dataset
+Agent: Removes it from S3 and the registry through the UI.
 
 You: Show me the schema of iris
-Agent: Returns columns, types, and 3 sample rows for iris.parquet.
-
-You: What is the average petal length by species?
-Agent: Queries iris.parquet in-memory and returns grouped averages.
+Agent: Returns columns, types, and sample rows.
 
 You: Which state has the most farmers markets?
-Agent: Runs Athena GROUP BY + COUNT → "California with 1,528 markets."
-
-You: What about the top 10?
-Agent: Remembers the previous question and returns top 10 (memory).
-
-You: archive
-Agent: Archives logs to S3 immediately.
-
-You: quit
-Agent: Archives logs and exits.
+Agent: Uses Athena for the aggregation and returns the answer.
 ```
 
 ---
 
-## 📊 CloudWatch Log Events
+## CloudWatch Log Events
 
 ```json
-{"timestamp": "2026-05-13T10:30:00Z", "event_type": "USER_QUERY",      "question": "top 5 states by markets?"}
-{"timestamp": "2026-05-13T10:30:02Z", "event_type": "AGENT_RESPONSE",  "query_mode": "ATHENA", "response_preview": "..."}
-{"timestamp": "2026-05-13T10:30:03Z", "event_type": "GUARDRAIL_EVENT", "direction": "OUTPUT", "action": "ALLOWED"}
+{"timestamp": "2026-05-14T10:30:00Z", "event_type": "USER_QUERY", "question": "top 5 states by markets?"}
+{"timestamp": "2026-05-14T10:30:02Z", "event_type": "AGENT_RESPONSE", "query_mode": "ATHENA"}
+{"timestamp": "2026-05-14T10:30:03Z", "event_type": "GUARDRAIL_EVENT", "direction": "OUTPUT", "action": "ALLOWED"}
 ```
 
-Archived to: `s3://nl-query-agent-<you>/logs/YYYY/MM/DD/agent-session-{timestamp}.json`
+Archived to:
+
+```text
+s3://nl-query-agent-<you>/logs/YYYY/MM/DD/agent-session-{timestamp}.json
+```
 
 ---
 
-## ⚙️ Configuration Reference (`config.py`)
+## Configuration Reference
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `BUCKET` | `nl-query-agent-yourname` | Globally unique S3 bucket name |
-| `REGION` | `ap-south-1` | AWS region |
-| `ATHENA_DB` | `nl_query_db` | Athena database name |
-| `ATHENA_OUTPUT` | `s3://…/athena-results/` | Where Athena writes query results |
-| `MODEL_ID` | `apac.amazon.nova-lite-v1:0` | Bedrock model |
-| `PANDAS_THRESHOLD` | `10_000` | Max rows for pandas_query |
-| `DATASETS` | `{"farmers_market": "…", "spotify": "…"}` | Permanent dataset registry |
-| `GUARDRAIL_ID` | `9iwaukwehxwu` | Set by `guardrail_setup.py` |
-| `GUARDRAIL_VERSION` | `"1"` | Guardrail version |
-
----
-
-## 🔧 Troubleshooting
-
-| Symptom | Cause | Fix |
-|--------|-------|-----|
-| `NoCredentialsError` | AWS not configured | Run `aws configure` |
-| `AccessDeniedException` | Missing IAM permissions | Add S3, Athena, Bedrock, CloudWatch policy |
-| `BucketAlreadyExists` | Bucket name taken | Change `BUCKET` in `config.py` |
-| `COLUMN_NOT_FOUND` in Athena | Schema drift | Run `sync_table_from_file(...)` |
-| Parquet upload fails | Missing pyarrow | `pip install pyarrow` |
-| File upload returns 422 | Missing python-multipart | `pip install python-multipart` |
-| `<thinking>` tags in response | Nova Lite chain-of-thought leak | Fixed in v2 via `strip_thinking()` |
-| Dataset missing after restart | Not in `config.py` DATASETS | Add entry to DATASETS or re-upload via UI |
-| Agent loops on Athena errors | Too many retries | Capped at 2 attempts; falls back to pandas |
-| Web UI 404 on `/` | Missing `templates/index.html` | Ensure file exists and run from project root |
+| Variable | Description |
+|---|---|
+| `BUCKET` | S3 bucket for datasets and logs. |
+| `REGION` | AWS region. |
+| `ATHENA_DB` | Athena database name. |
+| `MODEL_ID` | Bedrock model ID for Nova Lite. |
+| `PANDAS_THRESHOLD` | Row threshold for Pandas routing. |
+| `DATASETS` | Base dataset registry. |
+| `GUARDRAIL_ID` | Bedrock Guardrail ID. |
+| `GUARDRAIL_VERSION` | Guardrail version. |
 
 ---
 
-## 💰 AWS Cost Estimate
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `NoCredentialsError` | Run `aws configure`. |
+| `AccessDeniedException` | Update IAM permissions for S3, Athena, Bedrock, and CloudWatch. |
+| `BucketAlreadyExists` | Change the S3 bucket name in `config.py`. |
+| `COLUMN_NOT_FOUND` in Athena | Refresh the Athena schema sync. |
+| File upload fails | Install `python-multipart` and `pyarrow`. |
+| Dataset missing after restart | Re-upload it through the browser UI or add it to the registry. |
+| Query response looks stale | Refresh the page and re-run from history. |
+| JSON parse error in browser | Ensure `server.py` returns JSON and `index.html` uses `await res.json()`. |
+
+---
+
+## AWS Cost Estimate
 
 | Service | Usage | Est. Cost |
-|---------|-------|-----------|
-| S3 | ~10MB data + logs | < $0.01/month |
-| Athena | Small queries | ~$0.00005/query |
-| Bedrock Nova Lite | Per token | < $1/month dev usage |
-| CloudWatch Logs | < 1 GB | < $0.50/month |
-| **Total** | | **< $1/month** |
+|---|---|---|
+| S3 | Small datasets + logs | < $0.01/month |
+| Athena | Small query volumes | Low, pay-per-query |
+| Bedrock Nova Lite | Token-based inference | Typically < $1/month dev usage |
+| CloudWatch Logs | Light logging | Low |
+| Total |  | Usually under $1/month |
 
 ---
 
 *Built on AWS Strands Agents SDK · Amazon Bedrock · Athena · S3 · CloudWatch · FastAPI*  
-*v2: Multi-format (CSV · Parquet · JSON) · Conversation Memory · Dataset Upload UI · Query History*
+*Latest: Browser upload/delete UI · Query history · Session-aware memory · Multi-format datasets · IAM hardening · JSON query flow*
